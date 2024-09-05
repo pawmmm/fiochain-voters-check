@@ -38,6 +38,7 @@ export function generateHTML(voters: Voter[], producers: Producer[], status: Pro
             <div id="totalVotedFio">
                 <p>Correct Total Voted FIO: ${formatNumber(globalVotingData.correct_total_voted_fio)}</p>
                 <p>Wrong Total Voted FIO: ${formatNumber(globalVotingData.wrong_total_voted_fio)}</p>
+                <p>Balance Total Voted FIO: ${formatNumber(globalVotingData.balance_total_voted_fio)}</p>
             </div>
             
             <h2>Voters</h2>

@@ -270,6 +270,25 @@ export function calculateProducerVotes(voters: Voter[], producers: Producer[]): 
 
     return {
         correct_total_voted_fio,
-        wrong_total_voted_fio
+        wrong_total_voted_fio,
+        balance_total_voted_fio: 0 // This will be calculated in a separate pass
     };
+}
+
+export function calculateBalanceTotalVotedFio(voters: Voter[]): number {
+    const voterMap = new Map(voters.map(voter => [voter.owner, voter]));
+    let balance_total_voted_fio = 0;
+
+    for (const voter of voters) {
+        if (!voter.proxy && voter.producers.length > 0) {
+            balance_total_voted_fio += voter.available;
+        } else {
+            const proxyVoter = voterMap.get(voter.proxy);
+            if (proxyVoter && proxyVoter.is_proxy === 1 && proxyVoter.producers.length > 0) {
+                balance_total_voted_fio += voter.available;
+            }
+        }
+    }
+
+    return balance_total_voted_fio;
 }

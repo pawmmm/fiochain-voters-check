@@ -1,6 +1,6 @@
 import express from 'express';
 import { Voter, Producer, ProcessingStatus, GlobalVotingData } from './types';
-import { fetchVoters, updateFioPublicKeys, updateVoterBalances, updateLockedTokens, updateCalculatedTotals, updateProxiedVotes, fetchProducers, calculateProducerVotes } from './processors';
+import { fetchVoters, updateFioPublicKeys, updateVoterBalances, updateLockedTokens, updateCalculatedTotals, updateProxiedVotes, fetchProducers, calculateProducerVotes, calculateBalanceTotalVotedFio } from './processors';
 import { generateHTML } from './htmlGenerator';
 
 const app = express();
@@ -8,7 +8,11 @@ const port = 3000;
 
 let processedVoters: Voter[] = [];
 let processedProducers: Producer[] = [];
-let globalVotingData: GlobalVotingData = { correct_total_voted_fio: 0, wrong_total_voted_fio: 0 };
+let globalVotingData: GlobalVotingData = {
+    correct_total_voted_fio: 0,
+    wrong_total_voted_fio: 0,
+    balance_total_voted_fio: 0
+};
 let processingStatus: ProcessingStatus = {
     stage: '',
     balanceStatus: { current: 0, total: 0 },
@@ -93,6 +97,11 @@ async function processData() {
         processingStatus.stage = 'Calculating producer votes';
         globalVotingData = calculateProducerVotes(voters, producers);
         console.log("Finished calculating producer votes");
+
+        console.log("Calculating balance total voted FIO...");
+        processingStatus.stage = 'Calculating balance total voted FIO';
+        globalVotingData.balance_total_voted_fio = calculateBalanceTotalVotedFio(voters);
+        console.log("Finished calculating balance total voted FIO");
 
         processedVoters = voters;
         processedProducers = producers;

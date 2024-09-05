@@ -47,4 +47,5 @@ export interface Producer {
 export interface GlobalVotingData {
     correct_total_voted_fio: number;
     wrong_total_voted_fio: number;
+    balance_total_voted_fio: number;
 }
