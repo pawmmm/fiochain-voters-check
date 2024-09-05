@@ -10,9 +10,13 @@ export interface Voter {
     is_proxy: number;
     is_auto_proxy: number;
     balance: number;
-    locked: number;
-    calculated_last_vote_weight: number;
-    calculated_proxied_vote_weight: number;
+    available: number;
+    locked4: number;
+    fio_public_key: string;
+    correct_last_vote_weight: number;
+    wrong_last_vote_weight: number;
+    correct_proxied_vote_weight: number;
+    wrong_proxied_vote_weight: number;
 }
 
 export interface ProcessingStatus {
@@ -25,6 +29,10 @@ export interface ProcessingStatus {
         current: number;
         total: number;
     };
+    fioPublicKeyStatus: {
+        current: number;
+        total: number;
+    };
 }
 
 export interface Producer {
@@ -32,5 +40,6 @@ export interface Producer {
     owner: string;
     fio_address: string;
     total_votes: number;
-    calculated_total_votes: number;
+    correct_total_votes: number;
+    wrong_total_votes: number;
 }

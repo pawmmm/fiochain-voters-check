@@ -1,24 +1,15 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { Voter, Producer } from './types';
 import { API_SERVERS } from './config';
 
-const MAX_RETRIES = 5;
+const MAX_RETRIES = 10;
 const INITIAL_BACKOFF = 1000; // 1 second
-const MAX_BACKOFF = 5000; // 5 seconds
-const TIMEOUT = 5000; // 3 seconds
+const MAX_BACKOFF = 60000; // 60 seconds
+const BACKOFF_MULTIPLIER = 2;
+const TIMEOUT = 5000; // 5 seconds
 
-async function retryRequest(fn: () => Promise<any>, retries: number = 0): Promise<any> {
-    try {
-        return await fn();
-    } catch (error) {
-        if (retries >= MAX_RETRIES) {
-            throw error;
-        }
-        const backoff = Math.min(INITIAL_BACKOFF * Math.pow(2, retries), MAX_BACKOFF);
-        console.log(`Request failed. Retrying in ${backoff}ms... (${retries + 1}/${MAX_RETRIES})`);
-        await new Promise(resolve => setTimeout(resolve, backoff));
-        return retryRequest(fn, retries + 1);
-    }
+async function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 export async function fetchVoters(): Promise<Voter[]> {
@@ -47,9 +38,13 @@ export async function fetchVoters(): Promise<Voter[]> {
                 last_vote_weight: parseFloat(row.last_vote_weight) / 1000000000,
                 proxied_vote_weight: parseFloat(row.proxied_vote_weight) / 1000000000,
                 balance: 0,
-                locked: 0,
-                calculated_last_vote_weight: 0,
-                calculated_proxied_vote_weight: 0
+                available: 0,
+                locked4: 0,
+                fio_public_key: '',
+                correct_last_vote_weight: 0,
+                wrong_last_vote_weight: 0,
+                correct_proxied_vote_weight: 0,
+                wrong_proxied_vote_weight: 0
             })));
 
             more = data.more;
@@ -66,70 +61,123 @@ export async function fetchVoters(): Promise<Voter[]> {
     return voters;
 }
 
+async function retryRequest(fn: () => Promise<any>, retries: number = 0): Promise<any> {
+    try {
+        return await fn();
+    } catch (error) {
+        if (axios.isAxiosError(error) && retries < MAX_RETRIES) {
+            const backoffTime = Math.min(INITIAL_BACKOFF * Math.pow(BACKOFF_MULTIPLIER, retries), MAX_BACKOFF);
+            console.log(`Request failed. Scheduling retry in ${backoffTime}ms... (${retries + 1}/${MAX_RETRIES})`);
+            await sleep(backoffTime);
+            return retryRequest(fn, retries + 1);
+        }
+        throw error;
+    }
+}
+
 async function processBatch(voters: Voter[], updateFunction: (voter: Voter, server: string) => Promise<void>, updateProgress: (current: number, total: number) => void, totalVoters: number): Promise<Voter[]> {
     const failedVoters: Voter[] = [];
-    const promises = voters.map((voter, index) => {
-        const server = API_SERVERS[index];
-        return updateFunction(voter, server)
-            .then(() => {
-                updateProgress(1, totalVoters);
-                return null;
-            })
-            .catch((error) => {
-                console.error(`${server} errored`);
-                return voter;
-            });
-    });
+    const retryQueue: {voter: Voter, retries: number}[] = [];
 
-    const results = await Promise.allSettled(promises);
-    results.forEach((result, index) => {
-        if (result.status === 'rejected' || (result.status === 'fulfilled' && result.value !== null)) {
-            failedVoters.push(voters[index]);
+    const processVoter = async (voter: Voter, serverIndex: number, retries: number = 0) => {
+        const server = API_SERVERS[serverIndex % API_SERVERS.length];
+        try {
+            await updateFunction(voter, server);
+            updateProgress(1, totalVoters);
+        } catch (error) {
+            if (retries < MAX_RETRIES) {
+                const backoffTime = Math.min(INITIAL_BACKOFF * Math.pow(BACKOFF_MULTIPLIER, retries), MAX_BACKOFF);
+                console.log(`Request failed for voter ${voter.owner}. Scheduling retry with next server in ${backoffTime}ms... (${retries + 1}/${MAX_RETRIES})`);
+                retryQueue.push({voter, retries: retries + 1});
+                setTimeout(() => processRetry(), backoffTime);
+            } else {
+                console.log(`Failed to process voter ${voter.owner} after all retries`);
+                failedVoters.push(voter);
+            }
         }
-    });
+    };
+
+    const processRetry = async () => {
+        if (retryQueue.length > 0) {
+            const {voter, retries} = retryQueue.shift()!;
+            const nextServerIndex = retries % API_SERVERS.length;
+            await processVoter(voter, nextServerIndex, retries);
+        }
+    };
+
+    const initialPromises = voters.map((voter, index) => processVoter(voter, index));
+    await Promise.all(initialPromises);
+
+    // Wait for all retries to complete
+    while (retryQueue.length > 0) {
+        await sleep(100); // Small delay to prevent busy-waiting
+    }
 
     return failedVoters;
 }
 
-export async function updateVoterBalances(voters: Voter[], updateProgress: (current: number, total: number) => void): Promise<void> {
-    console.log(`Starting to update balances for ${voters.length} voters`);
+async function processVoters(voters: Voter[], updateFunction: (voter: Voter, server: string) => Promise<void>, updateProgress: (current: number, total: number) => void, functionName: string): Promise<void> {
+    console.log(`Starting to ${functionName} for ${voters.length} voters`);
     let processedCount = 0;
     let remainingVoters = [...voters];
 
-    const updateVoterBalance = async (voter: Voter, server: string) => {
-        const response = await axios.post(`${server}/v1/chain/get_currency_balance`, {
-            code: 'fio.token',
-            account: voter.owner,
-            symbol: 'FIO'
+    while (remainingVoters.length > 0) {
+        const batch = remainingVoters.slice(0, API_SERVERS.length);
+        console.log(`Processing batch of ${batch.length} voters`);
+
+        const failedVoters = await processBatch(batch, updateFunction, (current, total) => {
+            processedCount += current;
+            updateProgress(processedCount, voters.length);
+        }, voters.length);
+
+        if (failedVoters.length > 0) {
+            console.error(`Failed to process ${failedVoters.length} voters after all retries. Stopping the process.`);
+            throw new Error(`Failed to process voters in ${functionName}`);
+        }
+
+        remainingVoters = remainingVoters.slice(API_SERVERS.length);
+    }
+
+    console.log(`Finished ${functionName} for all voters`);
+}
+
+export async function updateFioPublicKeys(voters: Voter[], updateProgress: (current: number, total: number) => void): Promise<void> {
+    const updateVoterFioPublicKey = async (voter: Voter, server: string) => {
+        const response = await axios.post(`${server}/v1/chain/get_table_rows`, {
+            json: true,
+            code: "fio.address",
+            scope: "fio.address",
+            table: "accountmap",
+            limit: "1",
+            upper_bound: voter.owner,
+            lower_bound: voter.owner
         }, { timeout: TIMEOUT });
 
-        if (response.data.length > 0) {
-            voter.balance = parseFloat(response.data[0].split(' ')[0]);
-            voter.calculated_last_vote_weight = voter.balance;
+        const rows = response.data.rows;
+        if (rows.length > 0 && rows[0].account === voter.owner) {
+            voter.fio_public_key = rows[0].clientkey;
+        } else {
+            throw new Error(`No matching account found for ${voter.owner}`);
         }
     };
 
-    while (remainingVoters.length > 0) {
-        const batchSize = Math.min(API_SERVERS.length, remainingVoters.length);
-        const batch = remainingVoters.slice(0, batchSize);
+    await processVoters(voters, updateVoterFioPublicKey, updateProgress, "update FIO public keys");
+}
 
-        console.log(`Processing batch of ${batch.length} voters`);
-        const failedVoters = await processBatch(batch, updateVoterBalance, (current, total) => {
-            processedCount += current;
-            updateProgress(processedCount, total);
-        }, voters.length);
+export async function updateVoterBalances(voters: Voter[], updateProgress: (current: number, total: number) => void): Promise<void> {
+    const updateVoterBalance = async (voter: Voter, server: string) => {
+        const response = await axios.post(`${server}/v1/chain/get_fio_balance`, {
+            fio_public_key: voter.fio_public_key
+        }, { timeout: TIMEOUT });
 
-        remainingVoters = failedVoters.concat(remainingVoters.slice(batchSize));
-    }
+        voter.balance = parseFloat(response.data.balance) / 1000000000;
+        voter.available = parseFloat(response.data.available) / 1000000000;
+    };
 
-    console.log('Finished updating all voter balances');
+    await processVoters(voters, updateVoterBalance, updateProgress, "update voter balances");
 }
 
 export async function updateLockedTokens(voters: Voter[], updateProgress: (current: number, total: number) => void): Promise<void> {
-    console.log(`Starting to update locked tokens for ${voters.length} voters`);
-    let processedCount = 0;
-    let remainingVoters = [...voters];
-
     const updateVoterLockedTokens = async (voter: Voter, server: string) => {
         const response = await axios.post(`${server}/v1/chain/get_table_rows`, {
             json: true,
@@ -141,25 +189,20 @@ export async function updateLockedTokens(voters: Voter[], updateProgress: (curre
         }, { timeout: TIMEOUT });
 
         if (response.data.rows.length > 0 && response.data.rows[0].grant_type === 4) {
-            voter.locked = parseFloat(response.data.rows[0].remaining_locked_amount) / 1000000000;
-            voter.calculated_last_vote_weight = voter.balance - voter.locked;
+            voter.locked4 = parseFloat(response.data.rows[0].remaining_locked_amount) / 1000000000;
+        } else {
+            voter.locked4 = 0;
         }
     };
 
-    while (remainingVoters.length > 0) {
-        const batchSize = Math.min(API_SERVERS.length, remainingVoters.length);
-        const batch = remainingVoters.slice(0, batchSize);
+    await processVoters(voters, updateVoterLockedTokens, updateProgress, "update locked tokens");
+}
 
-        console.log(`Processing batch of ${batch.length} voters`);
-        const failedVoters = await processBatch(batch, updateVoterLockedTokens, (current, total) => {
-            processedCount += current;
-            updateProgress(processedCount, total);
-        }, voters.length);
-
-        remainingVoters = failedVoters.concat(remainingVoters.slice(batchSize));
+export function updateCalculatedTotals(voters: Voter[]): void {
+    for (const voter of voters) {
+        voter.correct_last_vote_weight = voter.balance - voter.locked4;
+        voter.wrong_last_vote_weight = voter.proxy ? voter.balance - voter.locked4 : voter.available;
     }
-
-    console.log('Finished updating all locked tokens');
 }
 
 export function updateProxiedVotes(voters: Voter[]): void {
@@ -169,11 +212,12 @@ export function updateProxiedVotes(voters: Voter[]): void {
         if (voter.proxy) {
             const proxy = voterMap.get(voter.proxy);
             if (proxy) {
-                proxy.calculated_proxied_vote_weight += voter.calculated_last_vote_weight;
-
+                proxy.correct_proxied_vote_weight += voter.correct_last_vote_weight;
+                proxy.wrong_proxied_vote_weight += voter.wrong_last_vote_weight;
                 // Only update calculated_last_vote_weight if the proxy is active (is_proxy === 1)
                 if (proxy.is_proxy === 1) {
-                    proxy.calculated_last_vote_weight += voter.calculated_last_vote_weight;
+                    proxy.correct_last_vote_weight += voter.correct_last_vote_weight;
+                    proxy.wrong_last_vote_weight += voter.wrong_last_vote_weight;
                 }
             }
         }
@@ -193,7 +237,8 @@ export async function fetchProducers(): Promise<Producer[]> {
             return response.data.producers.map((producer: any) => ({
                 ...producer,
                 total_votes: parseFloat(producer.total_votes) / 1000000000,
-                calculated_total_votes: 0
+                correct_total_votes: 0,
+                wrong_total_votes: 0
             }));
         } catch (error) {
             console.error(`Failed to fetch producers from server ${server}:`, error);
@@ -209,7 +254,8 @@ export function calculateProducerVotes(voters: Voter[], producers: Producer[]): 
         for (const producerOwner of voter.producers) {
             const producer = producerMap.get(producerOwner);
             if (producer) {
-                producer.calculated_total_votes += voter.calculated_last_vote_weight;
+                producer.correct_total_votes += voter.correct_last_vote_weight;
+                producer.wrong_total_votes += voter.wrong_last_vote_weight;
             }
         }
     }

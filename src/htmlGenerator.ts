@@ -1,4 +1,3 @@
-// src/htmlGenerator.ts
 import { Voter, Producer, ProcessingStatus } from './types';
 
 function formatNumber(value: number): string {
@@ -30,6 +29,7 @@ export function generateHTML(voters: Voter[], producers: Producer[], status: Pro
             <button id="processButton">Process Data</button>
             <div id="status">
                 Stage: ${status.stage}<br>
+                FIO Public Key Update: ${status.fioPublicKeyStatus.current}/${status.fioPublicKeyStatus.total}<br>
                 Balance Update: ${status.balanceStatus.current}/${status.balanceStatus.total}<br>
                 Locked Tokens Update: ${status.lockedTokensStatus.current}/${status.lockedTokensStatus.total}
             </div>
@@ -41,6 +41,7 @@ export function generateHTML(voters: Voter[], producers: Producer[], status: Pro
                         <th>ID</th>
                         <th>FIO Address</th>
                         <th>Owner</th>
+                        <th>FIO Public Key</th>
                         <th>Proxy</th>
                         <th>Producers</th>
                         <th>Last Vote Weight</th>
@@ -48,9 +49,12 @@ export function generateHTML(voters: Voter[], producers: Producer[], status: Pro
                         <th>Is Proxy</th>
                         <th>Is Auto Proxy</th>
                         <th>Balance</th>
-                        <th>Locked</th>
-                        <th>Calculated Last Vote Weight</th>
-                        <th>Calculated Proxied Vote Weight</th>
+                        <th>Available</th>
+                        <th>Locked4</th>
+                        <th>Correct Last Vote Weight</th>
+                        <th>Wrong Last Vote Weight</th>
+                        <th>Correct Proxied Vote Weight</th>
+                        <th>Wrong Proxied Vote Weight</th>
                     </tr>
                     ${voterTableRows}
                 </table>
@@ -63,7 +67,8 @@ export function generateHTML(voters: Voter[], producers: Producer[], status: Pro
                         <th>Owner</th>
                         <th>FIO Address</th>
                         <th>Total Votes</th>
-                        <th>Calculated Total Votes</th>
+                        <th>Correct Total Votes</th>
+                        <th>Wrong Total Votes</th>
                     </tr>
                     ${producerTableRows}
                 </table>
@@ -92,6 +97,7 @@ export function generateHTML(voters: Voter[], producers: Producer[], status: Pro
                         .then(status => {
                             document.getElementById('status').innerHTML = 
                                 \`Stage: \${status.stage}<br>
+                                FIO Public Key Update: \${status.fioPublicKeyStatus.current}/\${status.fioPublicKeyStatus.total}<br>
                                 Balance Update: \${status.balanceStatus.current}/\${status.balanceStatus.total}<br>
                                 Locked Tokens Update: \${status.lockedTokensStatus.current}/\${status.lockedTokensStatus.total}\`;
                             if (status.stage !== 'Complete' && status.stage !== '') {
@@ -120,6 +126,7 @@ function generateVoterTableRows(voters: Voter[]): string {
             <td>${voter.id}</td>
             <td>${voter.fioaddress}</td>
             <td>${voter.owner}</td>
+            <td>${voter.fio_public_key}</td>
             <td>${voter.proxy}</td>
             <td>${voter.producers.join(', ')}</td>
             <td>${formatNumber(voter.last_vote_weight)}</td>
@@ -127,9 +134,12 @@ function generateVoterTableRows(voters: Voter[]): string {
             <td>${voter.is_proxy}</td>
             <td>${voter.is_auto_proxy}</td>
             <td>${formatNumber(voter.balance)}</td>
-            <td>${formatNumber(voter.locked)}</td>
-            <td>${formatNumber(voter.calculated_last_vote_weight)}</td>
-            <td>${formatNumber(voter.calculated_proxied_vote_weight)}</td>
+            <td>${formatNumber(voter.available)}</td>
+            <td>${formatNumber(voter.locked4)}</td>
+            <td>${formatNumber(voter.correct_last_vote_weight)}</td>
+            <td>${formatNumber(voter.wrong_last_vote_weight)}</td>
+            <td>${formatNumber(voter.correct_proxied_vote_weight)}</td>
+            <td>${formatNumber(voter.wrong_proxied_vote_weight)}</td>
         </tr>
     `).join('');
 }
@@ -140,16 +150,17 @@ function generateProducerTableRows(producers: Producer[]): string {
             <td>${producer.owner}</td>
             <td>${producer.fio_address}</td>
             <td>${formatNumber(producer.total_votes)}</td>
-            <td>${formatNumber(producer.calculated_total_votes)}</td>
+            <td>${formatNumber(producer.correct_total_votes)}</td>
+            <td>${formatNumber(producer.wrong_total_votes)}</td>
         </tr>
     `).join('');
 }
 
 function isVoterHighlighted(voter: Voter): boolean {
-    return Math.abs(voter.calculated_last_vote_weight - voter.last_vote_weight) > 1 ||
-        Math.abs(voter.calculated_proxied_vote_weight - voter.proxied_vote_weight) > 1;
+    return Math.abs(voter.correct_last_vote_weight - voter.last_vote_weight) > 1 ||
+        Math.abs(voter.correct_proxied_vote_weight - voter.proxied_vote_weight) > 1;
 }
 
 function isProducerHighlighted(producer: Producer): boolean {
-    return Math.abs(producer.calculated_total_votes - producer.total_votes) > 1;
+    return Math.abs(producer.wrong_total_votes - producer.total_votes) > 1;
 }
