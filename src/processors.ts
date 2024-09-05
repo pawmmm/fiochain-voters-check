@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import { Voter, Producer } from './types';
+import { Voter, Producer, GlobalVotingData } from './types';
 import { API_SERVERS } from './config';
 
 const MAX_RETRIES = 10;
@@ -247,10 +247,18 @@ export async function fetchProducers(): Promise<Producer[]> {
     throw new Error("Failed to fetch producers from all servers");
 }
 
-export function calculateProducerVotes(voters: Voter[], producers: Producer[]): void {
+export function calculateProducerVotes(voters: Voter[], producers: Producer[]): GlobalVotingData {
     const producerMap = new Map(producers.map(producer => [producer.owner, producer]));
 
+    let correct_total_voted_fio = 0;
+    let wrong_total_voted_fio = 0;
+
     for (const voter of voters) {
+        if (voter.producers.length > 0) {
+            correct_total_voted_fio += voter.correct_last_vote_weight;
+            wrong_total_voted_fio += voter.wrong_last_vote_weight;
+        }
+
         for (const producerOwner of voter.producers) {
             const producer = producerMap.get(producerOwner);
             if (producer) {
@@ -259,4 +267,9 @@ export function calculateProducerVotes(voters: Voter[], producers: Producer[]): 
             }
         }
     }
+
+    return {
+        correct_total_voted_fio,
+        wrong_total_voted_fio
+    };
 }

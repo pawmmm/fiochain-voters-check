@@ -1,10 +1,10 @@
-import { Voter, Producer, ProcessingStatus } from './types';
+import { Voter, Producer, ProcessingStatus, GlobalVotingData } from './types';
 
 function formatNumber(value: number): string {
     return value.toFixed(9);
 }
 
-export function generateHTML(voters: Voter[], producers: Producer[], status: ProcessingStatus): string {
+export function generateHTML(voters: Voter[], producers: Producer[], status: ProcessingStatus, globalVotingData: GlobalVotingData): string {
     const voterTableRows = generateVoterTableRows(voters);
     const producerTableRows = generateProducerTableRows(producers);
 
@@ -32,6 +32,12 @@ export function generateHTML(voters: Voter[], producers: Producer[], status: Pro
                 FIO Public Key Update: ${status.fioPublicKeyStatus.current}/${status.fioPublicKeyStatus.total}<br>
                 Balance Update: ${status.balanceStatus.current}/${status.balanceStatus.total}<br>
                 Locked Tokens Update: ${status.lockedTokensStatus.current}/${status.lockedTokensStatus.total}
+            </div>
+            
+            <h2>Total Voted FIO</h2>
+            <div id="totalVotedFio">
+                <p>Correct Total Voted FIO: ${formatNumber(globalVotingData.correct_total_voted_fio)}</p>
+                <p>Wrong Total Voted FIO: ${formatNumber(globalVotingData.wrong_total_voted_fio)}</p>
             </div>
             
             <h2>Voters</h2>

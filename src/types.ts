@@ -43,3 +43,8 @@ export interface Producer {
     correct_total_votes: number;
     wrong_total_votes: number;
 }
+
+export interface GlobalVotingData {
+    correct_total_voted_fio: number;
+    wrong_total_voted_fio: number;
+}

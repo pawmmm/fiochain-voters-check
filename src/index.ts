@@ -1,5 +1,5 @@
 import express from 'express';
-import { Voter, Producer, ProcessingStatus } from './types';
+import { Voter, Producer, ProcessingStatus, GlobalVotingData } from './types';
 import { fetchVoters, updateFioPublicKeys, updateVoterBalances, updateLockedTokens, updateCalculatedTotals, updateProxiedVotes, fetchProducers, calculateProducerVotes } from './processors';
 import { generateHTML } from './htmlGenerator';
 
@@ -8,6 +8,7 @@ const port = 3000;
 
 let processedVoters: Voter[] = [];
 let processedProducers: Producer[] = [];
+let globalVotingData: GlobalVotingData = { correct_total_voted_fio: 0, wrong_total_voted_fio: 0 };
 let processingStatus: ProcessingStatus = {
     stage: '',
     balanceStatus: { current: 0, total: 0 },
@@ -16,7 +17,7 @@ let processingStatus: ProcessingStatus = {
 };
 
 app.get('/', (req, res) => {
-    res.send(generateHTML(processedVoters, processedProducers, processingStatus));
+    res.send(generateHTML(processedVoters, processedProducers, processingStatus, globalVotingData));
 });
 
 app.get('/api/status', (req, res) => {
@@ -90,7 +91,7 @@ async function processData() {
 
         console.log("Calculating producer votes...");
         processingStatus.stage = 'Calculating producer votes';
-        calculateProducerVotes(voters, producers);
+        globalVotingData = calculateProducerVotes(voters, producers);
         console.log("Finished calculating producer votes");
 
         processedVoters = voters;
